@@ -1,8 +1,8 @@
 # import of all libraries
 from tqdm import tqdm
-import itertools
-import random
 import numpy as np
+import threading
+import multiprocessing
 
 # create function to read all row in 00-example.txt
 def read_file(filename):
@@ -40,8 +40,8 @@ def calculate_fragments(demons, Si, Smax, T, seq):
         # create loop for deamons_defeated
         for j in range(len(demons_defeated)):
             # add fragments
-            if len(demons[demons_defeated[j]]['Fa_original']) > i - defeated_turns[j] and len(demons[demons_defeated[j]]['Fa_original']) > 0:
-                fragments += demons[demons_defeated[j]]['Fa_original'][i - defeated_turns[j]]
+            if len(demons[demons_defeated[j]]['Fa']) > i - defeated_turns[j] and len(demons[demons_defeated[j]]['Fa']) > 0:
+                fragments += demons[demons_defeated[j]]['Fa'][i - defeated_turns[j]]
             # recharge stamina
             if stamina < Smax and defeated_turns[j] + demons[demons_defeated[j]]['Tr'] == i:
                 stamina += demons[demons_defeated[j]]['Sr']
@@ -52,79 +52,71 @@ def calculate_fragments(demons, Si, Smax, T, seq):
             stamina -= demons[seq[len(demons_defeated)]]['Sc']
             demons_defeated.append(seq[len(demons_defeated)])
             defeated_turns.append(i)
-            if len(demons[demons_defeated[-1]]['Fa_original']) > 0:
-                fragments += demons[demons_defeated[-1]]['Fa_original'][0]
+            if len(demons[demons_defeated[-1]]['Fa']) > 0:
+                fragments += demons[demons_defeated[-1]]['Fa'][0]
     return fragments
 
 # Calculate the fragments earned by defeating a demon in a specific turn depending on the max turn we have until the end of the game
+stamina_recovered = None
 def fragment_will_obtain(demons, demon, turn_defeated):
     # sum all values in array demons[demon]['Fa'] from 0 to the end of the array or to turn_defeated if array is long enough
-    return np.sum(demons[demon]['Fa'][0:min(len(demons[demon]['Fa_original']), turn_defeated)])
+    return np.sum(demons[demon]['Fa'][0:min(len(demons[demon]['Fa']), turn_defeated)])
+def update_best_demon(demons, j, T, i, best_fragments, best_demon, lock, thread_semaphore):
+    fragments = fragment_will_obtain(demons, j, T-i)
+    if fragments > best_fragments.value:
+        with lock:
+            if fragments > best_fragments.value:
+                best_fragments.value = int(fragments)
+                best_demon.value = j
+    thread_semaphore.release()
+
 def calculate_sequence_to_optimize_fragment(demons, Si, Smax, T, D):
     stamina = Si
     demons_defeated = np.array([])
     # create npm array long T
     stamina_recovered = np.array([0]*T)
+    lock = threading.Lock()
     for i in tqdm(range(T)):
         # check if stamina is recovered
         stamina += stamina_recovered[i]
         if stamina > Smax:
             stamina = Smax
         # find demon to kill with more fragments
-        best_fragments = -1
-        best_demon = -1
-        for j in range(len(demons)):
+        best_fragments = multiprocessing.Value('i', -1)
+        best_demon = multiprocessing.Value('i', -1)
+        threads = []
+        thread_semaphore = threading.Semaphore(1)
+        for j in range(D):
             # check if demon is not in demons_defeated numpy array
             if j not in demons_defeated:
                 # check if stamina is enough to kill demon
                 if stamina >= demons[j]['Sc']:
-                    # calculate fragments obtained
-                    fragments = 0 #fragment_will_obtain(demons, j, T - i)
-                    indexFragment = len(demons[j]['Fa']) - (T - i)
-                    if(indexFragment < 0 and len(demons[j]['Fa']) > 0):
-                        fragments = demons[j]['Fa'][0]
-                    if indexFragment > 0 and indexFragment < len(demons[j]['Fa']):
-                        fragments = demons[j]['Fa'][-(T - i)]
-                    stamina_will_recover = demons[j]['Sr']
-                    stamina_cost = demons[j]['Sc']
-                    turns_to_recover = demons[j]['Tr']
-                    if turns_to_recover > T - i:
-                        stamina_will_recover = 0
-                    # check if fragments obtained are better than the best
-                    if fragments * 0.1 + stamina_will_recover - stamina_cost - turns_to_recover * 0.01 > best_fragments:
-                        best_fragments = fragments * 0.1 + stamina_will_recover - stamina_cost - turns_to_recover * 0.01
-                        best_demon = j
-        if best_demon != -1:
-            # kill demon 3989772 - 4564035 - 4564683 - 4666747
-            stamina -= demons[best_demon]['Sc']
+                    thread_semaphore.acquire()
+                    t = threading.Thread(target=update_best_demon, args=(demons, j, T, i, best_fragments, best_demon, lock, thread_semaphore))
+                    threads.append(t)
+                    t.start()
+        for t in threads:
+            t.join()
+        if best_demon.value != -1:
+            # kill demon
+            stamina -= demons[best_demon.value]['Sc']
             # add demon to demons_defeated
-            demons_defeated = np.append(demons_defeated, best_demon)
+            demons_defeated = np.append(demons_defeated, best_demon.value)
             # add stamina recovered
-            if demons[best_demon]['Tr'] > 0:
-                if len(stamina_recovered) > i+demons[best_demon]['Tr']:
-                    stamina_recovered[i+demons[best_demon]['Tr']] += demons[best_demon]['Sr']
+            if demons[best_demon.value]['Tr'] > 0:
+                if len(stamina_recovered) > i+demons[best_demon.value]['Tr']:
+                    stamina_recovered[i+demons[best_demon.value]['Tr']] += demons[best_demon.value]['Sr']
             else:
-                stamina += demons[best_demon]['Sr']
+                stamina += demons[best_demon.value]['Sr']
     return demons_defeated
-
 # print sequence in a file txt with 1 row per number of sequence
 def print_sequence_in_file(filename, sequence):
     with open(filename, 'w') as f:
         for i in sequence:
             f.write(str(i) + '\n')
 
-'''
-Create a function to create an array with the sum of fragments of each sequence
-following this rules: [0,5,2,0,1] => [8,8,3,1,1] with T as the max length of the sequence
-'''
-def create_fragment_sum_array(fragments):
-    fragments_sum = []
-    for i in range(min(len(fragments), T)):
-        fragments_sum.append(sum(fragments[i:min(len(fragments), T)]))
-    return fragments_sum
-
-for f in [1]:
-    file = files[f]
+for f in range(1):
+    file = files[3]
     row1 = file[0].split(' ')
     Si = int(row1[0]) # amount of initial stamina
     Smax = int(row1[1]) # maximum stamina
@@ -144,15 +136,12 @@ for f in [1]:
         # cast elements of row[4:] to int
         if d['Na'] != 0:
             d['Fa'] = [int(x) for x in row[4:]] # Fragments earned after defeating demon
-            d['Fa_original'] = [int(x) for x in row[4:]] # Fragments earned after defeating demon
             # translate d['Fa'] to numpy array
-            d['Fa'] = create_fragment_sum_array(d['Fa'])
+            d['Fa'] = np.array(d['Fa'])
         else:
             d['Fa'] = np.array([])
-            d['Fa_original'] = np.array([])
-        # if(len(d['Fa']) > 0):
         demons.append(d)
-    # print('demons', demons)
+    
     seq = calculate_sequence_to_optimize_fragment(demons, Si, Smax, T, D)
     # cast seq to int
     seq = [int(x) for x in seq]
