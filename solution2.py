@@ -58,8 +58,10 @@ def calculate_fragments(demons, Si, Smax, T, seq):
 
 # Calculate the fragments earned by defeating a demon in a specific turn depending on the max turn we have until the end of the game
 def fragment_will_obtain(demons, demon, turn_defeated):
-    # sum all values in array demons[demon]['Fa'] from 0 to the end of the array or to turn_defeated if array is long enough
-    return np.sum(demons[demon]['Fa'][0:min(len(demons[demon]['Fa_original']), turn_defeated)])
+    s = 0
+    for i in range(min(len(demons[demon]['Fa_original']), turn_defeated, 10)):
+        s += demons[demon]['Fa_original'][i]
+    return s
 def calculate_sequence_to_optimize_fragment(demons, Si, Smax, T, max_sr):
     stamina = Si
     demons_defeated = np.array([])
@@ -74,18 +76,12 @@ def calculate_sequence_to_optimize_fragment(demons, Si, Smax, T, max_sr):
         best_fragments = -1
         best_demon = -1
         for j in range(len(demons)):
-            print('max_sr', max_sr)
             # check if demon is not in demons_defeated numpy array
             if j not in demons_defeated:
                 # check if stamina is enough to kill demon
                 if stamina >= demons[j]['Sc']:
                     # calculate fragments obtained
-                    fragments = 0 #fragment_will_obtain(demons, j, T - i)
-                    indexFragment = len(demons[j]['Fa']) - (T - i)
-                    if(indexFragment < 0 and len(demons[j]['Fa']) > 0):
-                        fragments = demons[j]['Fa'][0]
-                    if indexFragment > 0 and indexFragment < len(demons[j]['Fa']):
-                        fragments = demons[j]['Fa'][-(T - i)]
+                    fragments = demons[j]['Fa_original'][0] if len(demons[j]['Fa_original']) > 0 else 0 #fragment_will_obtain(demons, j, T - i)
                     stamina_will_recover = demons[j]['Sr']
                     stamina_cost = demons[j]['Sc']
                     turns_to_recover = demons[j]['Tr']
@@ -129,7 +125,7 @@ def create_fragment_sum_array(fragments):
         fragments_sum.append(sum(fragments[i:min(len(fragments), T)]))
     return fragments_sum
 
-for f in [0]:
+for f in [3]:
     file = files[f]
     row1 = file[0].split(' ')
     Si = int(row1[0]) # amount of initial stamina
@@ -150,12 +146,12 @@ for f in [0]:
         d['Na'] = int(row[3]) # Number of turns you'll earn fragments after defeating demon
         # cast elements of row[4:] to int
         if d['Na'] != 0:
-            d['Fa'] = [int(x) for x in row[4:]] # Fragments earned after defeating demon
+            #d['Fa'] = [int(x) for x in row[4:]] # Fragments earned after defeating demon
             d['Fa_original'] = [int(x) for x in row[4:]] # Fragments earned after defeating demon
             # translate d['Fa'] to numpy array
-            d['Fa'] = create_fragment_sum_array(d['Fa'])
+            #d['Fa'] = create_fragment_sum_array(d['Fa'])
         else:
-            d['Fa'] = np.array([])
+            #d['Fa'] = np.array([])
             d['Fa_original'] = np.array([])
         # if(len(d['Fa']) > 0):
         demons.append(d)
